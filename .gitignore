@@ -248,3 +248,6 @@ docs/demo/frames/
 
 # operational activation-loop state (not the PMS replica)
 fastclinic_ops.sqlite
+
+# UI review screenshots (uploaded to the PR, never committed)
+.screenshots/

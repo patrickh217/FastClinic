@@ -8,8 +8,8 @@ from fasthtml.common import (
     Textarea, Label, NotStr,
 )
 
-from web import seo
-from web.i18n import format_number, preserve, t
+from services import seo_service as seo
+from i18n import format_number, preserve, t
 
 # Site to audit — overridable via env (matches web_app's SEO_SITE).
 SEO_SITE = os.getenv("FASTCLINIC_SEO_SITE", "https://fastclinic.dev")

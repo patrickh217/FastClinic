@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pms.catalog import gender_label
+from services.catalog import gender_label
 
 FHIR_VERSION = "4.0.1"
 BASE_URL = "https://fastclinic.dev/api/v1/fhir"

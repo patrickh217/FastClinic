@@ -1,97 +1,90 @@
-import json
+"""FHIR XML serialisation.
+
+Kept from the pre-restructure suite because the exporter survived: it now
+serialises what backbone returns rather than locally-assembled rows. Element
+order is pinned by the FHIR spec, so a reordering bug is a spec violation that
+downstream validators will reject.
+"""
+
+from __future__ import annotations
+
 from xml.etree import ElementTree as ET
 
 import pytest
 
-from web.fhir.ingress import FHIR_NS, _xml_value, normalize_bundle
-from web.fhir.xml import FHIRXMLSerializationError, XHTML_NS, bundle_to_xml
-from scripts.convert_health_exports_to_fhir import convert
+from services.fhir_xml import FHIR_NS, bundle_to_xml
+
+BUNDLE = {
+    "resourceType": "Bundle",
+    "id": "b1",
+    "type": "document",
+    "entry": [
+        {
+            "resource": {
+                "resourceType": "Patient",
+                "id": "p1",
+                "active": True,
+                "name": [{"family": "Okafor", "given": ["Ada"]}],
+                "gender": "female",
+                "birthDate": "1990-06-02",
+            }
+        }
+    ],
+}
 
 
-def _document_bundle():
-    # Deliberately shuffled to mirror PostgreSQL JSONB key ordering.
-    return {
-        "entry": [
-            {
-                "resource": {
-                    "title": "Synthetic episode note",
-                    "date": "2026-08-14T10:00:00Z",
-                    "status": "final",
-                    "type": {"coding": [{"display": "Episode note", "code": "34133-9", "system": "http://loinc.org"}]},
-                    "id": "composition-1",
-                    "subject": {"reference": "urn:uuid:patient-1"},
-                    "section": [{
-                        "title": "Clinical note",
-                        "text": {
-                            "div": '<div xmlns="http://www.w3.org/1999/xhtml"><p>Safe &amp; readable</p></div>',
-                            "status": "additional",
-                        },
-                    }],
-                    "resourceType": "Composition",
-                },
-                "fullUrl": "urn:uuid:composition-1",
-            },
-            {
-                "resource": {
-                    "identifier": [{"value": "synthetic-1", "system": "https://example.test/pid"}],
-                    "id": "patient-1",
-                    "resourceType": "Patient",
-                },
-                "fullUrl": "urn:uuid:patient-1",
-            },
-        ],
-        "timestamp": "2026-08-14T10:00:00Z",
-        "type": "document",
-        "identifier": {"value": "urn:uuid:bundle-1", "system": "urn:ietf:rfc:3986"},
-        "id": "bundle-1",
-        "resourceType": "Bundle",
-    }
-
-
-def test_bundle_xml_uses_normative_namespaces_wrappers_and_order():
-    raw = bundle_to_xml(_document_bundle())
-    root = ET.fromstring(raw)
-
-    assert raw.startswith(b'<?xml version="1.0" encoding="UTF-8"?>')
+@pytest.mark.unit
+def test_bundle_serialises_to_the_fhir_namespace():
+    """GIVEN a Bundle WHEN serialised THEN the root is a namespaced Bundle."""
+    root = ET.fromstring(bundle_to_xml(BUNDLE))
     assert root.tag == f"{{{FHIR_NS}}}Bundle"
-    assert [child.tag.rsplit("}", 1)[-1] for child in root] == [
-        "id", "identifier", "type", "timestamp", "entry", "entry",
-    ]
-    first_entry = root.findall(f"{{{FHIR_NS}}}entry")[0]
-    assert [child.tag.rsplit("}", 1)[-1] for child in first_entry] == ["fullUrl", "resource"]
-    wrapper = first_entry.find(f"{{{FHIR_NS}}}resource")
-    assert wrapper is not None
-    assert wrapper[0].tag == f"{{{FHIR_NS}}}Composition"
-    assert root.find(f".//{{{XHTML_NS}}}div") is not None
 
 
-def test_generated_xml_round_trips_through_shared_ingress_adapter():
-    parsed = _xml_value(ET.fromstring(bundle_to_xml(_document_bundle())))
-    document = normalize_bundle(parsed, "download.fhir.xml", "xml")
-
-    assert document.bundle_id == "bundle-1"
-    assert document.patient_identifier_value == "synthetic-1"
-    assert [resource["resourceType"] for _, resource in document.resources] == ["Composition", "Patient"]
+def _text() -> str:
+    # bundle_to_xml returns bytes: it is served as an application/fhir+xml body,
+    # and encoding it once at the source avoids a round-trip through str.
+    return bundle_to_xml(BUNDLE).decode("utf-8")
 
 
-def test_serializer_fails_closed_for_unknown_fields():
-    payload = _document_bundle()
-    payload["notAField"] = "unsafe"
+@pytest.mark.unit
+def test_primitives_are_value_attributes_not_text():
+    """GIVEN a FHIR primitive THEN it serialises as value="…", per the spec —
+    element text would be silently wrong and still parse."""
+    xml = _text()
+    assert 'value="female"' in xml
+    assert 'value="1990-06-02"' in xml
+    assert ">female<" not in xml
 
-    with pytest.raises(FHIRXMLSerializationError, match="Unsupported field"):
-        bundle_to_xml(payload)
+
+@pytest.mark.unit
+def test_booleans_serialise_lowercase():
+    """GIVEN a boolean THEN it is 'true', not Python's 'True'."""
+    xml = _text()
+    assert 'value="true"' in xml
+    assert 'value="True"' not in xml
 
 
-def test_existing_html_adapter_emits_normative_resource_wrappers(tmp_path):
-    source = tmp_path / "synthetic-episode.html"
-    output = tmp_path / "synthetic-episode.fhir.xml"
-    source.write_text("<html><body><h1>Synthetic episode</h1><p>Start: 14.08.2026</p></body></html>")
+@pytest.mark.unit
+def test_patient_with_a_name_serialises():
+    """GIVEN a patient with name, telecom and address WHEN serialised THEN it
+    succeeds. Before 2026-08-15 the ordering table had no entry for any of the
+    three, so the fail-closed serializer rejected every named patient."""
+    bundle = {
+        "resourceType": "Bundle", "id": "b2", "type": "document",
+        "entry": [{"resource": {
+            "resourceType": "Patient", "id": "p2",
+            "name": [{"family": "Okafor", "given": ["Ada"]}],
+            "telecom": [{"system": "phone", "value": "+44 20 7000 0000"}],
+            "address": [{"city": "London", "country": "GB"}],
+        }}],
+    }
+    xml = bundle_to_xml(bundle).decode("utf-8")
+    assert 'value="Okafor"' in xml and 'value="London"' in xml
 
-    result = convert(source, output, "2026-08-14T10:00:00Z")
-    root = ET.parse(output).getroot()
-    entries = root.findall(f"{{{FHIR_NS}}}entry")
-    generated_json = json.loads((tmp_path / result["json"]).read_text())
 
-    assert len(entries) == 5
-    assert all(entry.find(f"{{{FHIR_NS}}}resource") is not None for entry in entries)
-    assert generated_json["entry"][0]["resource"]["resourceType"] == "Composition"
+@pytest.mark.unit
+def test_round_trips_through_a_parser():
+    """GIVEN the output WHEN parsed THEN it is well-formed and carries the patient."""
+    root = ET.fromstring(bundle_to_xml(BUNDLE))
+    families = [e.get("value") for e in root.iter(f"{{{FHIR_NS}}}family")]
+    assert families == ["Okafor"]

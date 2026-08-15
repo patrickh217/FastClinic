@@ -16,7 +16,8 @@ from __future__ import annotations
 from typing import Any
 from xml.etree import ElementTree as ET
 
-from web.fhir.ingress import FHIR_NS
+# Inlined when web/fhir/ingress.py was deleted; it is a fixed FHIR constant.
+FHIR_NS = "http://hl7.org/fhir"
 
 XHTML_NS = "http://www.w3.org/1999/xhtml"
 FHIR_XML_MEDIA_TYPE = "application/fhir+xml"
@@ -100,6 +101,19 @@ _COMPLEX_ORDER: dict[str, tuple[str, ...]] = {
     "Composition.section.text": ("status", "div"),
     "Composition.section.entry": ("reference", "type", "identifier", "display"),
     "Patient.identifier": ("use", "type", "system", "value", "period", "assigner"),
+    # Added 2026-08-15. Patient declares name/telecom/address as fields but had no
+    # ordering for any of them, so the serializer fail-closed on every patient who
+    # had a name. Orders are FHIR R4 HumanName / ContactPoint / Address / Reference.
+    "Patient.name": ("use", "text", "family", "given", "prefix", "suffix", "period"),
+    "Patient.name.period": ("start", "end"),
+    "Patient.telecom": ("system", "value", "use", "rank", "period"),
+    "Patient.address": (
+        "use", "type", "text", "line", "city", "district", "state",
+        "postalCode", "country", "period",
+    ),
+    "Patient.address.period": ("start", "end"),
+    "Patient.generalPractitioner": ("reference", "type", "identifier", "display"),
+    "Patient.managingOrganization": ("reference", "type", "identifier", "display"),
     "Encounter.identifier": ("use", "type", "system", "value", "period", "assigner"),
     "Encounter.class": ("system", "version", "code", "display", "userSelected"),
     "Encounter.subject": ("reference", "type", "identifier", "display"),

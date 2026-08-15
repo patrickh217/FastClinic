@@ -1,17 +1,18 @@
-"""Generate a fully synthetic FastClinic GP-clinic export (.xlsx).
+"""Generate fully synthetic clinic data.
 
-No real patient data ever ships. This builds a realistic-looking 5-sheet export
-(patient, Consultationdiagnosis, Consultationnote, Consultationitem, client) that
-the normal importer (`python -m pms.importer`) turns into fastclinic.sqlite. Every
-column is populated — including the contact fields a real export omits — so the
-cockpit, activation engines (due / lapsed / follow-up) and revenue charts all
-light up.
+No real patient data ever ships. `generate()` returns five in-memory sheets —
+patient, Consultationdiagnosis, Consultationnote, Consultationitem, client — with
+every column populated, including the contact fields a real PMS export omits.
 
-    python -m pms.synth [out.xlsx] [n_patients]   # default: data/synthetic_fastclinic.xlsx, 1000
+**The consumer is `tools/seed_demo_data.py`**, which adapts these rows to FHIR and
+writes them into a MedBackend dev project. Dates are Excel serials here (a legacy
+of the .xlsx export this began as); the seeder converts them back.
 
-The output is deterministic (seeded) so re-running produces the same dataset.
-The xlsx is written with a tiny stdlib OOXML writer — the inverse of pms/xlsx.py
-(shared strings for text, serials for dates) — so no openpyxl/pandas is needed.
+    python -m tools.seed_demo_data --dry-run     # build and validate, no writes
+    python -m tools.synth [out.xlsx] [n]         # optional: still writes an .xlsx
+
+Output is deterministic (seeded), so re-running produces the same dataset — which
+is what makes the seeder's search-before-create idempotent across runs.
 """
 from __future__ import annotations
 

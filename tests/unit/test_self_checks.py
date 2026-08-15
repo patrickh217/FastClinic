@@ -21,6 +21,7 @@ MODULES = [
     "middleware.auth_gate",
     "components.sidebar",
     "components.common.states",
+    "tools.seed_demo_data",
 ]
 
 

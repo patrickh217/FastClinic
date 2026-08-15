@@ -1,1 +1,0 @@
-"""FastClinic cockpit evaluation pack."""

@@ -11,7 +11,7 @@ from fasthtml.common import (
 from services import seo_service as seo
 from i18n import format_number, preserve, t
 
-# Site to audit — overridable via env (matches web_app's SEO_SITE).
+# Site to audit - overridable via env.
 SEO_SITE = os.getenv("FASTCLINIC_SEO_SITE", "https://fastclinic.dev")
 SEO_SITE_LABEL = SEO_SITE.replace("https://", "").replace("http://", "").rstrip("/")
 

@@ -11,7 +11,7 @@ heygen/output
 screenshots/
 data/*.csv
 data/*.xlsx
-!data/synthetic_fastclinic.xlsx
+# (no synthetic export any more - demo data is seeded into MedBackend)
 data/*.gif
 docs/
 reports/

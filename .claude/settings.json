@@ -1,0 +1,34 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block-upstream-push.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-commit-screenshots.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(pytest:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(gh pr view:*)"
+    ],
+    "deny": [
+      "Bash(git push upstream*)",
+      "Bash(git push https://github.com/predictivelabsai*)"
+    ]
+  }
+}

@@ -1,185 +1,115 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repository.
 
-## Project Overview
+## What this is
 
-**FastClinic** — an open-source FastHTML **multi-specialty clinic operations
-platform**. It runs the back office of a modern clinic spanning **general
-practice, surgical specialties** (orthopaedics, ophthalmology, ENT, general
-surgery, gynaecology, urology, dermatology, plastics, cardiology,
-gastroenterology) **and dental care**: case mix & revenue by specialty,
-appointments with real availability, fee invoicing with a balanced ledger, and
-patient recall. Operations-first; recall/outreach is one part, not the focus.
+**FastClinic** — a multi-specialty clinic operations SaaS. A FastHTML + HTMX cockpit for the back office of a clinic spanning general practice, surgical specialties and dental care: patients, appointments, charting, fee invoicing and patient recall.
 
-Every treatment line is classified on two axes in `pms/catalog.py`: **category**
-(what kind of activity — consultation, surgery, dental, diagnostic, procedure,
-preventive…) and **specialty** (which department delivered it). See
-`web/clinic_queries.py` (`specialty_mix`, `top_procedures`, `surgical_kpis`) and
-the **Treatments & Specialties** view (`/treatments`).
+**FastClinic owns no medical data.** MedBackend is the backend and system of record — FHIR R4 store, multi-tenant RBAC, patient and practitioner OAuth, terminology. This repo holds presentation, clinic workflow, and one MedBackend client package. Nothing else.
 
-Clinical palette: primary blue `#1e6fb8`, dark `#1b2733`, accent green `#1f9d72`.
-Tagline *"Modern clinical care, made personal."* Port **5005**.
+Port **5005**. Palette: primary `#1e6fb8`, dark `#1b2733`, accent `#1f9d72`. Tagline *"Modern clinical care, made personal."*
 
-The FastHTML shell (auth, 3-pane layout, AI chat, comms modules) is reused across
-the portfolio. **All data is synthetic — there is no real patient data (PHI)
-anywhere in the repo.**
+## Git — read before any command
 
-## Commands
+| Remote | URL | Rule |
+|---|---|---|
+| `origin` | `patrickh217/FastClinic` | our fork. PRs go here. |
+| `upstream` | `predictivelabsai/FastClinic` | public. **Never push.** |
+
+The clone shipped with `origin` pointing at the public upstream. Work branches carry no upstream tracking, deliberately, so a bare `git push` has no default destination. `.claude/hooks/block-upstream-push.sh` blocks anything that would reach it anyway.
+
+Always work in a worktree: `git worktree add .claude/worktrees/<task> -b claude/YYYY-MM-DD-<desc> upstream/main`.
+
+## Key entrypoints
+
+| Path | Read it when |
+|---|---|
+| `app.py` | wiring — middleware order is load-bearing and asserted by a test |
+| `routes/__init__.py` | `register_all_routes(rt)`, plus `/`, `/health`, `/health/ready` |
+| `services/medbackend/fhir_client.py` | **read first before any data work** — every backbone quirk is handled here and nowhere else |
+| `auth/oauth_service.py` | the medbackend-oauth authorization-code flow |
+| `config/config.py` | per-environment defaults; secrets by name, never by value |
+
+## How to run
 
 ```bash
-# Create a virtualenv and install deps
 python -m venv .venv && .venv/bin/python -m pip install -r requirements.txt
-
-.venv/bin/python -m pms.synth             # write data/synthetic_fastclinic.xlsx (default 1000 patients)
-.venv/bin/python -m pms.importer          # build fastclinic.sqlite from newest data/*.xlsx
-.venv/bin/python -m pms.importer data/synthetic_fastclinic.xlsx fastclinic.sqlite   # explicit
-.venv/bin/python web_app.py               # cockpit on :5005; canonical login at /login
-
-.venv/bin/python -m evals.run_eval        # regression smoke test (see Testing)
-.venv/bin/python -m evals.run_eval --quiet
-bash scripts/build_user_guide.sh          # rebuild docs/fastclinic_user_guide.pdf (pandoc + weasyprint)
-
-docker compose up -d                      # containerised (mounts /data volume)
+.venv/bin/python app.py                        # cockpit on :5005
+.venv/bin/python -m tools.seed_demo_data       # synthetic FHIR into the dev project
+.venv/bin/python -m pytest tests/unit tests/integration     # offline
+MEDBACKEND_LIVE_TEST=1 .venv/bin/python -m pytest tests/e2e # live, against dev
 ```
 
-No linter/formatter configured. `fasthtml.md` (repo root) is the FastHTML
-best-practices reference; `docs/FASTHTML_AUDIT.md` records audit findings.
+No linter configured. `fasthtml.md` at the repo root is the FastHTML reference.
 
 ## Architecture
 
-### Data layer — synthetic PMS export → SQLite/PostgreSQL (`pms/`, `web/db.py`)
+```
+browser → FastHTML (app.py, routes/, components/)
+            ├── auth/         medbackend-oauth: authorization_code + refresh
+            │                 entity_type = Practitioner (staff) | Patient (portal)
+            └── services/medbackend/
+                  base_client.py   shared httpx.AsyncClient, X-Project-ID
+                  fhir_client.py   backbone /graphql — FHIR R4 CRUD
+                  app_client.py    medbackend-app REST — project, members
+```
 
-- **`pms/synth.py`** — generates `data/synthetic_fastclinic.xlsx`, a fully
-  synthetic, structurally realistic GP PMS export (people, consultations,
-  diagnoses, notes, billable line items). No real PHI.
-- The PMS export is a multi-sheet `.xlsx`: **patient**, **diagnosis**, **note**,
-  **item** (billable lines), plus an optional **client** contacts sheet, linked
-  by `consultation_id` / `patient_id` / `client_id`.
-- **`pms/xlsx.py`** — dependency-free OOXML reader (stdlib `zipfile` +
-  `ElementTree`). Cells are keyed by their `r=` reference (e.g. `C2`) — empty
-  cells are omitted, so never index positionally.
-- **`pms/catalog.py`** — keyword rules that classify each line item
-  (`vaccine` → "Immunisation", `health_plan` → "Health check / care plan",
-  `repeat_prescription`, `consultation`, `lab`, `imaging`, `procedure`,
-  `medication`, `referral`) and define recurring re-visit intervals in days
-  (vaccine / health_plan 365, repeat_prescription 60). Edit here to extend the
-  catalogue.
-- **`pms/importer.py`** — builds `fastclinic.sqlite`: tables `patient`,
-  `diagnosis`, `note`, `item`, plus derived `consultation` (one row per visit:
-  date, revenue, is_visit) and `client` (one row per patient's contact record).
-  Column mapping is **declarative** (`(col, xlsx_key, sql_type, converter)`
-  tuples) so raw tables are a 1:1 replica of the export; `evals` asserts 100%
-  field coverage. The model column for the supervising clinician is
-  `clinician_id` (xlsx key `supervising_clinician_id`). Idempotent — re-run to
-  refresh.
-- **`web/db.py`** — portable SQLite/PostgreSQL clinical access (`query`, `query_one`,
-  `scalar`, transactional writes). Select with `FASTCLINIC_DATABASE_BACKEND`;
-  PostgreSQL uses `DATABASE_URL_PROD` and the isolated
-  `FASTCLINIC_DB_SCHEMA` (`fast_clinic` by default).
-- **`web/ops_db.py`** — portable SQLite/PostgreSQL operational storage for
-  appointments, reminders, communications, billing/ledger, API audit, chat, and
-  local-account state. Select with `FASTCLINIC_OPS_BACKEND`; PostgreSQL shares
-  `DATABASE_URL_PROD` and the configured schema. SQLite remains the local/test
-  fallback. `scripts/migrate_ops_to_postgres.py` copies legacy SQLite state.
-- **`scripts/migrate_clinical_to_postgres.py`** — transactionally copies and
-  verifies the seven synthetic clinical tables before commit.
+**The five-layer funnel.** Every feature follows it:
 
-The person is modelled as a single entity: `patient` is the person, `client` is
-the same person's 1:1 contact record (`patient.client_id`). Human demographic
-fields only (gender, date of birth, NHS number, blood group, insurance).
+```
+routes/<feature>/__init__.py     setup_<feature>_routes(rt) — calls sub-registrars, nothing else
+  └─ routes/<feature>/_pages.py  GET → fetch → component → base_layout
+       ├─ handlers/<feature>_handlers.py    singleton; catches exceptions, RETURNS FT
+       │    └─ services/<feature>_service.py  FHIR ⇄ UI transforms
+       │         └─ services/medbackend/fhir_client.py
+       └─ components/<feature>/<feature>_component.py   page assembler — pure
+            ├─ components/<feature>/ui/{table,stats,header,modals,actions}.py
+            └─ components/common/{modal,forms,lazy}.py
+```
 
-### Cockpit (`web_app.py`, `web/`)
+`_forms` must register before `_pages`, or `POST /x` and `GET /x` collide. A feature starts as one file and becomes a package past ~400 LOC. `ui/` packages export through a barrel `__init__.py` with `__all__`.
 
-- **`web_app.py`** — routes + canonical account/Google session authentication.
-  `_ensure_db()` auto-builds the DB on boot if missing and a `data/*.xlsx` is
-  present. Most route handlers are named `get`/`post` — FastHTML registers them
-  by the `@rt("/path")` decorator, not the function name.
-- **`web/layout.py`** — 3-pane grid, `LAYOUT_CSS` (FastClinic palette),
-  `NAV_ITEMS` (Overview · Activation · Clinic · Marketing · Help · Admin), and
-  the right-rail **Copilot** (chat). The copilot can minimise / expand; a small
-  amount of `LAYOUT_JS` drives this. **fast_app already bundles htmx** — don't
-  add a second `<script src=htmx>` in `page()`.
-- **`web/clinic_queries.py`** — read-only dashboard queries (overview KPIs,
-  trends, patients, clinical). Includes `clinician_activity()` and
-  `demographics_mix()` (gender distribution: keys `label`, `n`).
-- **`web/dashboards.py`** — server-rendered FastHTML views (Plotly for charts
-  only): Overview, Patients + drilldown, Clinical, Revenue, Data & Import,
-  SMS + Email broadcasters, AI page, System Prompt.
-- **`web/activation.py`** — **the core.** Three engines + English message drafts
-  + CSV export, no auto-send: `reminders` (due/overdue recurring services),
-  `lapsed` (no visit in N months), `followup` (recent visits). Lists include
-  name/phone for the SMS/Email broadcasters; `campaign_csv()` backs
-  `/activation/{engine}/csv`.
-- **`web/commands.py`** — slash-command dispatcher for the chat (`/kpi /due
-  /lapsed /followup /revenue /patients /patient ID /help`, also `cmd:` colon
-  syntax). Natural-language help phrases short-circuit here without an LLM call.
-  Non-command messages fall through to the AI assistant.
-- **`web/help_views.py`** — Help section: `/help/shortcuts` (the slash-command
-  reference, `SHORTCUTS` is the single source of truth) and `/help/guide` (web
-  render of `docs/fastclinic_user_guide.md`; images + PDF served statically from
-  `docs/`).
-- **`web/clinical.py`** + **`web/access.py`** — local Medplum-style workspace:
-  staff/patient roles, writable chart encounters + SOAP notes, lab/imaging/
-  referral/medication orders, care tasks, coverage, in-app messages, intake,
-  and a patient portal. The imported PMS record stays read-only; new work
-  lives in the ops database. Shared admin login remains full administrator.
-- **`web/fhir/`** — Clinic OS Phase 5a: vanilla FHIR R4 projection of the
-  normalised core (`Patient`, `RelatedPerson`/`Person`, `Encounter`,
-  `Condition`, item-by-category, notes, appointments, consent, reminders).
-  Read surface at `/api/v1/fhir/*`; admin preview at `/admin/fhir`.
-- **`web/adapters/`** — country port (`CountryAdapter`) plus the NHS adapter
-  (`web/adapters/nhs/`): NHS Number modulus 11, UK Core R4, GP Connect STU3
-  translation. Live PDS/GP Connect raise `AdapterNotAvailable` until onboarded.
-- **`web/seo.py`** + **`web/seo_views.py`** — LLM SEO/GEO-audit suite, targeted at
-  `FASTCLINIC_SEO_SITE`. Prompts in `prompts/seo/`, outputs `data/seo/`.
-- **`web/exports.py`**, **`web/sse.py`** — CSV exports and server-sent-event
-  streaming helpers.
+## Non-negotiable rules
 
-### AI assistant (`graph/clinic_assistant.py`)
+1. **No local persistence of clinical data.** No SQLite, no PostgreSQL, no ORM, no cache with a TTL. The session holds tokens and claims; everything else is fetched.
+2. **Components do no I/O.** No `from services`, no `from handlers`, no `httpx`, no `async def`. Data arrives only as a plain `list` or `dict`.
+3. **All outbound HTTP to MedBackend goes through `services/medbackend/`.** A bare `httpx` call elsewhere is a bug.
+4. **Every backbone request carries `X-Project-ID`** matching the token's `project_uid` claim. Missing is an HTTP 400 *before* GraphQL runs — it does not look like an auth error.
+5. **An empty list means unknown, not none.** backbone's `search_resources` swallows every exception and returns `[]`. Rendering "no allergies" when the query failed is the dangerous version of this bug.
+6. **Never re-implement backbone.** RBAC, validation, compartments, terminology and audit are its job. Upstream breakage is filed as an issue, never patched around.
+7. **Python-first, JS-last.** FastHTML → CSS → HTMX → inline JS, in that order. Before any `Script()` block, document why CSS and HTMX cannot do it.
+8. **Secrets by name and location, never by value** — in code, in docs, in `.env.example`.
 
-- Free-form chat (non-slash) calls `clinic_assistant.answer()`: a **LangGraph
-  ReAct agent** over read-only clinic-data tools, with a configurable model
-  provider — `MODEL_PROVIDER` (xai | openai | anthropic | google), `MODEL_NAME`.
-  xAI/Grok runs through `langchain-openai` against the x.ai base URL. With no
-  provider/key it falls back to a slash-command nudge (so evals/offline still
-  work). System prompt: `prompts/system_prompt.md`.
+## Working with backbone — the traps
 
-### Accounting agent (`scripts/accounting_agent.py`)
+- **There is no total.** `ConnectionType.count` is a post-RBAC page length. `Bundle.total` is never read. Counts mean fetching ≤1000 rows and calling `len()`; label them as capped.
+- **No `_sort`, `_lastUpdated`, `_include` or `_id`.** No ordering, no incremental sync, and an extra round-trip for every referenced name. Design lists around filters.
+- **Every error is HTTP 200 prefixed `Authentication failed:`**, including RBAC denials. `"Access denied"` in the message is the only 403 discriminator.
+- **`XUpdate` is a full PUT replace** — no PATCH, no `If-Match`. Re-read immediately before writing.
+- **`XCreate` is not idempotent** and backbone does no server-side dedup. Search-before-create on a stable identifier.
+- **Writes are denied by default** (`default_access: Forbidden`, templates ship `validation_rules: []`). A 403 on a new resource type is missing configuration, not our bug.
+- **Generate client types from introspection against a running server.** backbone's `docs/complete_schema.graphql` is generator input and its `docs/graphql/*` has wrong argument names.
+- `XList(count:, offset:)` lowercase; `XConnection(Count:, Offset:)` capitalised. Reads take `String!`, mutations `ID!`.
 
-- A clinic-bookkeeping demonstrator that processes **synthetic** supplier
-  invoices. No real financial data, no live provider logins.
+## Auth
 
-## Environment
+Three identity planes. Staff and patients authenticate to **medbackend-oauth** (`entity_type` `Practitioner` / `Patient`). The tenant owner administering the project authenticates to **Authentik** via medbackend-app — a completely separate identity with no link to the Practitioner one, granting no FHIR access. A clinic admin logs in twice; that is by design.
 
-All config in `.env` (see `.env.sample`). Core:
-`FASTCLINIC_SECRET`, `FASTCLINIC_PORT`, optional local-only
-`FASTCLINIC_BOOTSTRAP_AUTH_ENABLED/EMAIL/PASSWORD`,
-`FASTCLINIC_DATABASE_BACKEND`, `FASTCLINIC_OPS_BACKEND`, `FASTCLINIC_DB`, `DATABASE_URL_PROD`,
-`FASTCLINIC_DB_SCHEMA`, `FASTCLINIC_TODAY`, `FASTCLINIC_SEO_SITE`. AI assistant:
-`MODEL_PROVIDER` (xai|openai|anthropic|google), `MODEL_NAME`, and the matching
-key (`XAI_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY`).
-SMS: `TWILIO_*`, `VOODOO_SMS_*`. Email: `POSTMARK_API_TOKEN`, `POSTMARK_FROM`,
-`EMAIL_REPLY_TO`. Load via python-dotenv (values with spaces break naive
-`source .env`).
+The JWT carries **no `roles` and no `scope`** — backbone treats `entity_type` as the role. UI sub-roles derive from the practitioner's FHIR `PractitionerRole` resources, fetched once after login.
 
-## Deployment
+`/login` returns JSON `{"redirect_url": …}`, not a 302. Code TTL 10 min, access 1 h, refresh 7 days **rotated on every use**. No PKCE; `client_secret` mandatory; exchange server-side only. See the `medbackend-login` skill.
 
-- `Dockerfile` (python:3.12-slim, port 5005). `.dockerignore` excludes ad-hoc
-  exports but **keeps `data/synthetic_fastclinic.xlsx`** so the deployed image
-  ships demo data; `_ensure_db()` builds the SQLite on first boot.
-- `docker-compose.yml` mounts a `fastclinic-data` volume at `/data` with
-  `FASTCLINIC_DB=/data/fastclinic.sqlite` so the database lives outside the image
-  (build it in-container with
-  `python -m pms.importer /data/export.xlsx /data/fastclinic.sqlite`).
-- The cockpit shows a graceful "No data loaded" screen until a DB exists.
+## Upstream dependencies — consumed, never modified
 
-## Testing
+`backbone` (FHIR over GraphQL) · `medbackend-oauth` (patient/practitioner auth) · `medbackend-app` (project, members, RBAC config) · `medterminology`.
 
-- **Eval pack** (`evals/run_eval.py`, ground truth in `evals/ground-truth/*.csv`)
-  is the regression gate: builds a fresh DB from `synthetic_fastclinic.xlsx`,
-  then runs shortcut/chat/route suites + a field-coverage check. It runs
-  **offline** — the AI chat suite only checks for a non-empty answer, so the
-  no-key fallback passes. Writes JSON to `eval-results/`.
-- **UI**: drive with Playwright MCP (`browser_navigate`, `browser_take_screenshot`).
-  Prefer server-rendered FastHTML over client JS.
+## Agents
+
+`.claude/agents/` — `medbackend-contract-guard` (the boundary), `fhir-mapping-reviewer` (clinical correctness), `fasthtml-htmx-specialist` (layout, JS policy, HTMX), `ui-reviewer` (Playwright visual review).
+
+`.claude/hooks/pre-commit-screenshots.sh` blocks a commit touching `routes/`, `components/`, `app.py` or `static/` without a screenshot under 60 minutes old. Starting the dev server is a safe local action — do it yourself.
+
+## Restructure in flight
+
+This branch is converting the repo from a self-contained backend. Until it lands you may still find `pms/`, `web/db.py`, `web/ops_db.py`, `web/fhir/`, `web/adapters/`, `web/api.py` and three legacy auth mechanisms. **All are being deleted — do not build on them.** Spec: `02 Projects/fastclinic/05 Specs/medbackend-client-restructure.md` in the MyBrain vault.

@@ -1,0 +1,2 @@
+# Shell scripts must keep LF — a CRLF shebang makes bash fail with "bad interpreter".
+*.sh text eol=lf

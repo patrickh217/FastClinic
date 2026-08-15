@@ -190,8 +190,13 @@ secrets/
 .playwright-mcp/
 .playwright-cli/
 
-# Claude Code local state
-.claude/
+# Claude Code — local state ignored, shared config committed
+.claude/*
+!.claude/agents/
+!.claude/hooks/
+!.claude/skills/
+!.claude/settings.json
+.claude/settings.local.json
 
 # Media / video / image outputs
 *.mp4

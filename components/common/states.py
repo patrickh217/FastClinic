@@ -76,7 +76,19 @@ def render_list(result, render, *, noun: str, empty_message: str, empty_hint: st
 
 
 def demo() -> None:
-    from services.medbackend.fhir_client import SearchResult
+    # A local stand-in rather than importing SearchResult: components must not
+    # depend on services, and render_list only needs .certain / .items / .capped.
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class SearchResult:
+        items: list = field(default_factory=list)
+        certain: bool = True
+        capped: bool = False
+
+        def __len__(self):
+            return len(self.items)
+
 
     rendered = str(render_list(SearchResult([], certain=False), lambda i: Div("x"),
                                noun="patients", empty_message="No patients"))

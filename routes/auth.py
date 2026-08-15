@@ -13,10 +13,8 @@ from auth import oauth_config, oauth_service
 from auth.auth_utils import build_context
 from components.layout import page
 from config import config
+from handlers.auth_handlers import auth_handlers
 from middleware.auth_gate import clear_session
-from services.medbackend.fhir_client import FhirClient
-
-PRACTITIONER_ROLE_FIELDS = "id code { coding { system code display } } specialty { coding { code display } }"
 
 
 def register_auth_routes(rt) -> None:
@@ -64,28 +62,13 @@ def register_auth_routes(rt) -> None:
         session["refresh_token"] = tokens.refresh_token
         session["expires_at"] = tokens.expires_at
 
-        # The JWT carries no roles, so capabilities come from FHIR. Both calls are
-        # best-effort: a practitioner with no PractitionerRole still gets a usable
-        # default, and backbone remains the real gate either way.
-        client = FhirClient(auth_token=tokens.access_token)
-        try:
-            session["reference"] = await client.me()
-        except Exception:
-            session["reference"] = None
-
-        roles: list[dict] = []
+        # The JWT carries no roles, so identity beyond the claims comes from FHIR.
         context = build_context(tokens.access_token)
-        if not context.is_patient and context.entity_id:
-            try:
-                found = await client.search(
-                    "PractitionerRole",
-                    PRACTITIONER_ROLE_FIELDS,
-                    {"practitioner": context.entity_id},
-                )
-                roles = found.items
-            except Exception:
-                roles = []
-        session["practitioner_roles"] = roles
+        identity = await auth_handlers.resolve_identity(
+            tokens.access_token, context.entity_id, context.is_patient
+        )
+        session["reference"] = identity["reference"]
+        session["practitioner_roles"] = identity["practitioner_roles"]
 
         return RedirectResponse("/portal" if context.is_patient else "/", status_code=303)
 

@@ -35,11 +35,13 @@ Always work in a worktree: `git worktree add .claude/worktrees/<task> -b claude/
 
 ```bash
 python -m venv .venv && .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python app.py                        # cockpit on :5005
-.venv/bin/python -m tools.seed_demo_data       # synthetic FHIR into the dev project
-.venv/bin/python -m pytest tests/unit tests/integration     # offline
-MEDBACKEND_LIVE_TEST=1 .venv/bin/python -m pytest tests/e2e # live, against dev
+infisical run --env=dev -- .venv/bin/python app.py                   # cockpit on :5005
+infisical run --env=dev -- .venv/bin/python -m tools.seed_demo_data  # synthetic FHIR into the dev project
+.venv/bin/python -m pytest tests/unit tests/integration              # offline, needs no secrets
+infisical run --env=dev -- env MEDBACKEND_LIVE_TEST=1 .venv/bin/python -m pytest tests/e2e
 ```
+
+Anything reading `MEDBACKEND_*` or `FASTCLINIC_SECRET` needs the `infisical run` prefix. The offline suite does not — it stubs the client.
 
 No linter configured. `fasthtml.md` at the repo root is the FastHTML reference.
 
@@ -110,6 +112,16 @@ The JWT carries **no `roles` and no `scope`** — backbone treats `entity_type` 
 
 `.claude/hooks/pre-commit-screenshots.sh` blocks a commit touching `routes/`, `components/`, `app.py` or `static/` without a screenshot under 60 minutes old. Starting the dev server is a safe local action — do it yourself.
 
-## Restructure in flight
+## Secrets
 
-This branch is converting the repo from a self-contained backend. Until it lands you may still find `pms/`, `web/db.py`, `web/ops_db.py`, `web/fhir/`, `web/adapters/`, `web/api.py` and three legacy auth mechanisms. **All are being deleted — do not build on them.** Spec: `02 Projects/fastclinic/05 Specs/medbackend-client-restructure.md` in the MyBrain vault.
+Infisical project `1df07d5e-69fe-46f2-82e9-a3b638770491` (env `dev`). Prefix commands needing env vars with `infisical run --env=dev --`. No `.env` in this repo — see `infisical` skill.
+
+Only five keys are stored there, because everything else has a code default: `FASTCLINIC_SECRET`, `MEDBACKEND_PROJECT_ID`, `MEDBACKEND_PRACTITIONER_CLIENT_ID`, `MEDBACKEND_PRACTITIONER_CLIENT_SECRET`, `MEDBACKEND_REDIRECT_URI` — exactly the set `config.readiness()` gates on. The three MedBackend URLs come from `_DEFAULTS` in `config/config.py`, keyed by environment. `.env.example` is stale and lists keys nothing reads.
+
+## Restructure — landed
+
+The conversion from a self-contained backend merged as [#1](https://github.com/patrickh217/FastClinic/pull/1) on 2026-08-19 (`aff16c2`). `pms/`, `web/db.py`, `web/ops_db.py`, `web/fhir/`, `web/adapters/`, `web/api.py` and the three legacy auth mechanisms are gone. If you find a reference to any of them, it is a leftover to delete, not an API to use.
+
+Known gap: `components/sidebar.py` lists `/portal`, `/appointments` and `/clinical` in `NAV_ITEMS`, and none are registered routes — a practitioner with the `scheduling` or `clinical` capability gets a 404. Either strip the entries or build the routes; do not add more nav items to unbuilt screens.
+
+Spec: `02 Projects/fastclinic/05 Specs/medbackend-client-restructure.md` in the MyBrain vault.

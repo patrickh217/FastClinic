@@ -1,0 +1,3 @@
+# Gitignored files copied into new worktrees from the repo root.
+.env
+.env.local

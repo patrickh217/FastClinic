@@ -11,13 +11,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# SQLite mode reads fastclinic.sqlite. Mount /data and set FASTCLINIC_DB, then:
-#   docker compose exec fastclinic python -m pms.importer /data/export.xlsx /data/fastclinic.sqlite
-# PostgreSQL mode uses DATABASE_URL_PROD and FASTCLINIC_DB_SCHEMA=fast_clinic.
-# The source SQLite database remains available as a rollback path.
+# No database and no volume: MedBackend is the system of record, so the container
+# is stateless and holds nothing that needs persisting between restarts.
 EXPOSE 5005
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl --fail http://localhost:5005/login || exit 1
+# /health is liveness only. /health/ready is the deploy gate - it 503s while any
+# required setting is missing or still a placeholder, so a half-configured deploy
+# fails visibly instead of serving a broken app.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl --fail http://localhost:5005/health || exit 1
 
-ENTRYPOINT ["python", "web_app.py"]
+ENTRYPOINT ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5005"]

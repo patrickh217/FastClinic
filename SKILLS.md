@@ -46,7 +46,7 @@ must return 200 with expected content and no error/`No data loaded` markers.
 
 ## Cockpit Dashboard
 
-**Entry:** `.venv/bin/python web_app.py` (port 5005, canonical account/Google login at `/login`)
+**Entry:** `.venv/bin/python app.py` (port 5005, canonical account/Google login at `/login`)
 
 3-pane FastHTML business dashboard: left nav, centre view, right chat/info panel.
 

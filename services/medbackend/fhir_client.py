@@ -7,9 +7,20 @@ Every trap documented in the vault's backbone gotchas is handled here exactly on
   rather than letting a view render "none".
 - Every error arrives HTTP 200 with the prefix "Authentication failed:", RBAC
   denials included. "Access denied" inside the message is the only 403 signal.
-- `ConnectionType.count` is a post-RBAC page length, not a total. There is no total.
-- `XList(count:, offset:)` is lowercase; `XConnection(Count:, Offset:)` is not.
-- Reads take `String!`, mutations take `ID!`.
+- There is no total anywhere. `XConnection` used to declare a `count` that was a
+  post-RBAC page length; backbone#226 removed it rather than keep shipping a field
+  named for a number it cannot produce. The payload is `pagesize`, `next`, `edges`.
+- Arguments are lowercase on both (`XList(count:, offset:)`, `XConnection(count:,
+  cursor:)`) since backbone#210. `XList.offset` is declared and raises
+  `UnsupportedParameter` -- Azure pages forward-only, so only `XConnection.cursor`
+  actually pages.
+- Reads and mutations both take `ID!` since backbone#213.
+- Output types carry no `Type` suffix since backbone#212 (`Patient`, not
+  `PatientType`). Nothing here breaks, because the only type names we spell are
+  the *inputs* -- `{X}CreateInput` / `{X}UpdateInput` -- and those keep their
+  names permanently: HL7 declares `type Patient` and `input Patient` in one file,
+  so the input side has to disambiguate and always will. Do not start naming
+  output types in fragments or variable annotations; there is no reason to.
 """
 
 from __future__ import annotations
@@ -20,9 +31,9 @@ from typing import Any
 from config import config
 from services.medbackend.base_client import BaseApiClient, shared_client
 
-# backbone caps a page here; deeper pagination is not implemented upstream
-# (XList sends _skip, XConnection sends _offset, neither is a FHIR param, and
-# Azure's continuation token is not handled anywhere).
+# backbone caps a page here; deeper pagination is not implemented on our side.
+# `XConnection.cursor` is backbone's continuation token and is the only thing that
+# pages; nothing here sends it yet.
 MAX_PAGE = 1000
 
 
@@ -95,8 +106,7 @@ class FhirClient(BaseApiClient):
         return (data.get("Me") or {}).get("reference")
 
     async def read(self, resource_type: str, resource_id: str, fields: str) -> dict[str, Any] | None:
-        # Reads take String!, unlike mutations which take ID!.
-        query = f"query Read($id: String!) {{ {resource_type}(id: $id) {{ {fields} }} }}"
+        query = f"query Read($id: ID!) {{ {resource_type}(id: $id) {{ {fields} }} }}"
         data = await self.execute(query, {"id": resource_id})
         # A row-level RBAC denial also arrives as null, with no error. Indistinguishable.
         return data.get(resource_type)

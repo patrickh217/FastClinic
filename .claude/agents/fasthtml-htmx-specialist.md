@@ -1,5 +1,6 @@
 ---
 name: fasthtml-htmx-specialist
+model: sonnet
 description: >
   FastHTML + HTMX patterns and file organisation for this repo. Use when adding or reviewing
   anything under components/ or routes/, when a Script() block is being introduced, or when

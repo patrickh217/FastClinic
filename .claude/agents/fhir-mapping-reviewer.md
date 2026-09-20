@@ -1,5 +1,6 @@
 ---
 name: fhir-mapping-reviewer
+model: sonnet
 description: >
   Reviews FHIR R4 resource construction, mapping and query shape. Use when adding or changing
   anything under services/, tools/seed_demo_data.py, or any GraphQL document — and before any

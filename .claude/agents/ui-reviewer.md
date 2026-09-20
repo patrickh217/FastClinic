@@ -1,5 +1,6 @@
 ---
 name: ui-reviewer
+model: sonnet
 description: >
   Drives a real browser against the running app to verify UI changes: navigation, HTMX swaps,
   modals, empty and error states, responsiveness, accessibility. Produces the screenshots that

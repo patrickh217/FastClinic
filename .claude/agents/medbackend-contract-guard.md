@@ -1,5 +1,6 @@
 ---
 name: medbackend-contract-guard
+model: opus
 description: >
   Enforces the boundary that FastClinic owns no medical data. Reviews any change that adds
   persistence, re-implements something backbone already does, or edits an upstream contract.

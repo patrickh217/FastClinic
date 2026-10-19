@@ -1,8 +1,10 @@
 """Authorization-code flow against medbackend-oauth.
 
-Confidential client only: client_secret is mandatory at /token and PKCE is not
-implemented upstream (code_verifier is accepted and silently ignored), so the
-exchange must happen server-side. Fine here; fatal for any future SPA or mobile app.
+Confidential client: client_secret is sent at /token, so the exchange must happen
+server-side. This module sends no PKCE. medbackend-oauth verifies a code_verifier
+(S256) and accepts public clients without a secret once medbackend-oauth#102
+(PR #204) is deployed; before that the verifier is ignored. A future SPA or mobile
+app needs a public client and PKCE, not this module.
 """
 
 from __future__ import annotations
